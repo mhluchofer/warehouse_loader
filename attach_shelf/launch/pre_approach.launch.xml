@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Declare launch arguments -->
+    <arg name="obstacle" default="0.5" description="Distance (in meters) to stop before obstacle"/>
+    <arg name="degrees" default="0" description="Rotation degrees after stopping"/>
+    <arg name="use_sim_time" default="true"/>
+
+    <!-- Launch the pre_approach executable -->
+    <node pkg="attach_shelf" exec="pre_approach" name="pre_approach_node" output="screen">
+        <!-- Pass args as node parameters -->
+        <param name="obstacle" value="$(var obstacle)"/>
+        <param name="degrees" value="$(var degrees)"/>
+    </node>
+
+    <!-- RViz2 -->
+    <node
+        pkg="rviz2" exec="rviz2" name="rviz2" output="screen"
+        args="-d /home/user/ros2_ws/src/warehouse_loader/attach_shelf/rviz/config.rviz">
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+    </node>
+</launch>

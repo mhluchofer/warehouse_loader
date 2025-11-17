@@ -10,6 +10,33 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(rcl_interfaces REQUIRED)
+
+# Add executables
+add_executable(pre_approach src/pre_approach.cpp)
+
+# Link dependencies
+ament_target_dependencies(pre_approach 
+	rclcpp
+	sensor_msgs
+	geometry_msgs
+	nav_msgs
+	tf2
+	rcl_interfaces)
+
+# Install executables
+install(TARGETS 
+	pre_approach
+	DESTINATION lib/${PROJECT_NAME})
+
+# Install share files, launch 
+install(DIRECTORY
+	launch
+	rviz
+	DESTINATION share/${PROJECT_NAME})
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
