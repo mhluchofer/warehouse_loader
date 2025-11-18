@@ -14,6 +14,8 @@ find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
 	"srv/GoToLoading.srv")
@@ -37,7 +39,11 @@ ament_target_dependencies(pre_approach
 	
 ament_target_dependencies(approach_service
 	rclcpp
-	sensor_msgs)
+	sensor_msgs
+	geometry_msgs
+	tf2
+	tf2_ros
+	std_msgs)
 target_link_libraries(approach_service ${cpp_typesupport_target})
 
 
@@ -45,6 +51,7 @@ target_link_libraries(approach_service ${cpp_typesupport_target})
 # Install executables
 install(TARGETS 
 	pre_approach
+	approach_service
 	DESTINATION lib/${PROJECT_NAME})
 
 # Install share files, launch 
