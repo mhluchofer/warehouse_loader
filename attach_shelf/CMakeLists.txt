@@ -8,14 +8,23 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+	"srv/GoToLoading.srv")
 
 # Add executables
 add_executable(pre_approach src/pre_approach.cpp)
+add_executable(approach_service src/approach_service_server.cpp)
+
+# Get the typesupport target and link it (adds include dirs + build order)
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 # Link dependencies
 ament_target_dependencies(pre_approach 
@@ -25,6 +34,13 @@ ament_target_dependencies(pre_approach
 	nav_msgs
 	tf2
 	rcl_interfaces)
+	
+ament_target_dependencies(approach_service
+	rclcpp
+	sensor_msgs)
+target_link_libraries(approach_service ${cpp_typesupport_target})
+
+
 
 # Install executables
 install(TARGETS 
@@ -36,7 +52,6 @@ install(DIRECTORY
 	launch
 	rviz
 	DESTINATION share/${PROJECT_NAME})
-
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
