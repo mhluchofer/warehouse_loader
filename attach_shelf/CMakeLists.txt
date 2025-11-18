@@ -23,6 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # Add executables
 add_executable(pre_approach src/pre_approach.cpp)
 add_executable(approach_service src/approach_service_server.cpp)
+add_executable(pre_approach_v2 src/pre_approach_v2.cpp)
 
 # Get the typesupport target and link it (adds include dirs + build order)
 rosidl_get_typesupport_target(cpp_typesupport_target
@@ -46,12 +47,20 @@ ament_target_dependencies(approach_service
 	std_msgs)
 target_link_libraries(approach_service ${cpp_typesupport_target})
 
-
+ament_target_dependencies(pre_approach_v2
+	rclcpp
+	sensor_msgs
+	geometry_msgs
+	nav_msgs
+	tf2
+	rcl_interfaces)
+target_link_libraries(pre_approach_v2 ${cpp_typesupport_target})
 
 # Install executables
 install(TARGETS 
 	pre_approach
 	approach_service
+	pre_approach_v2
 	DESTINATION lib/${PROJECT_NAME})
 
 # Install share files, launch 

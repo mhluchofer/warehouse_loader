@@ -41,6 +41,12 @@ public:
     deg_range.step = 1;
     degrees_desc.integer_range = {deg_range};
 
+
+    // -- final_approach (bool) ---
+    ParameterDescriptor final_approach_desc;
+    final_approach_desc.description = "Do final attachment to shelf after approach.";
+
+
     // Declare parameters (with defualts)
     this->declare_parameter<double>("obstacle", 0.5,
                                     obstacle_desc); // Obstacle distance to
@@ -48,15 +54,20 @@ public:
     this->declare_parameter<int>(
         "degrees", 0, degrees_desc); // Rotation degrees after stop (degrees)
 
+    this->declare_parameter<bool>(
+    "final_approach", false,
+    final_approach_desc); // Attach to the shelf after approach
+
     // Load params for use
     this->get_parameter("obstacle", obstacle_dist_);
     obstacle_dist_ += obstacle_error_; // small error to detect early obstacle
 
     this->get_parameter("degrees", rotation_degrees_);
 
-    RCLCPP_INFO(this->get_logger(),
-                "Params loaded: obstacle=%.2f m, degrees=%.d", obstacle_dist_,
-                rotation_degrees_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "Params loaded: obstacle=%.2f m, degrees=%.d, final_approach=%s",
+        obstacle_dist_, rotation_degrees_, final_approach_ ? "True" : "False");
 
     // Subscribers
     scan_subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
@@ -73,19 +84,20 @@ public:
         "/diffbot_base_controller/cmd_vel_unstamped", 10);
 
     // Services
-    std::string name_service = '/approach_shelf';
+    std::string name_service = "/approach_shelf";
+    // Declarar correctamente un SharedPtr
     approach_client_ = this->create_client<GoToLoading>(name_service);
 
-    // Wait for the service to be available (check every second)
+    // Esperar a que el servicio esté disponible
     while (!approach_client_->wait_for_service(1s)) {
-      if (!rclcpp::ok()) {
-        RCLCPP_ERROR(this->get_logger(),
-                     "Interrupted while waiting for the service. Exiting.");
-        return;
-      }
-      RCLCPP_INFO(this->get_logger(),
-                  "Service %s not available, waiting again...",
-                  name_service.c_str());
+        if (!rclcpp::ok()) {
+            RCLCPP_ERROR(this->get_logger(),
+                        "Interrupted while waiting for the service. Exiting.");
+            return;
+        }
+        RCLCPP_INFO(this->get_logger(),
+                    "Service %s not available, waiting again...",
+                    name_service.c_str());
     }
 
     // Control Loop Timer
@@ -104,10 +116,11 @@ private:
       scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   //rclcpp::CallbackGroup::SharedPtr callback_group_;
-  rclcpp::Client<GoToLoading> approach_client_;
+  rclcpp::Client<GoToLoading>::SharedPtr approach_client_;
   rclcpp::TimerBase::SharedPtr timer_;
   double obstacle_dist_{0.5}; // Param: stop distance
   int rotation_degrees_{0};   // Param: rotation after stop
+  bool final_approach_{false};
   const double obstacle_error_ =
       0.04; // considering 10HZ and 0.5 speed,(give or take 1 sec err)
   const double linear_vel_ = 0.5;
@@ -146,7 +159,32 @@ private:
         if (std::abs(yaw_error) < 0.05) {
             stop();
             turning_ = false;
-            rclcpp::shutdown();
+
+            // Stop the timer so the loop doesn’t run again.
+            if (timer_)
+            timer_->cancel();
+
+            // Build request
+            auto request = std::make_shared<GoToLoading::Request>();
+            request->attach_to_shelf = final_approach_;
+            RCLCPP_INFO(this->get_logger(),
+                        "Calling Aproach Shelf Service with attach_to_shelf: %s",
+                        final_approach_ ? "True" : "False");
+            approach_client_->async_send_request(
+                request, [node = this->shared_from_this()](
+                            rclcpp::Client<GoToLoading>::SharedFuture future) {
+                try {
+                    auto response = future.get();
+                    RCLCPP_INFO(node->get_logger(),
+                                "Approach service response: compelte=%s",
+                                response->complete ? "True" : "False");
+                } catch (const std::exception &e) {
+                    RCLCPP_ERROR(node->get_logger(),
+                                "Approach Service call error: %s", e.what());
+                }
+                // final clean shutdown
+                rclcpp::shutdown();
+                });
             return;
         }
 

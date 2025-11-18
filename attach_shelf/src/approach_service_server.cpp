@@ -21,6 +21,10 @@ struct Cluster {
   float value;
 };
 
+struct ClusterCenterError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 class ApproachService : public rclcpp::Node {
 
 public:
@@ -71,6 +75,12 @@ private:
     // ------------------- SERVICE -------------------
     void approach_callback(const std::shared_ptr<GoToLoading::Request> request,
                             std::shared_ptr<GoToLoading::Response> response) {
+
+        if (!last_scan) {
+            RCLCPP_ERROR(get_logger(), "No LaserScan received yet");
+            response->complete = false;
+            return;
+        }
         const bool attach_to_shelf = request->attach_to_shelf;
         RCLCPP_INFO(this->get_logger(),
                     "Approach Service Requested, AttachToShelf: %s",
@@ -90,8 +100,16 @@ private:
         RCLCPP_INFO(this->get_logger(), "Detected %ld shelf legs(clusters)",intensity_clusters.size());
 
         // 2. Identify centres of cluster and calculate centre between 2 shelf legs
-        geometry_msgs::msg::Point p1 = find_cluster_center(*last_scan, intensity_clusters[0]);
-        geometry_msgs::msg::Point p2 = find_cluster_center(*last_scan, intensity_clusters[1]);
+        geometry_msgs::msg::Point p1, p2;
+        try {
+        p1 = find_cluster_center(*last_scan, intensity_clusters[0]);
+        p2 = find_cluster_center(*last_scan, intensity_clusters[1]);
+        } 
+        catch (const ClusterCenterError &e) {
+        RCLCPP_ERROR(get_logger(), "Shelf Leg(Cluster) center error: %s",e.what());
+        response->complete = false;
+        return;
+        }
         RCLCPP_INFO(this->get_logger(), "First leg X: %.3f Y: %.3f", p1.x, p1.y);
         RCLCPP_INFO(this->get_logger(), "Second leg X: %.3f Y: %.3f", p2.x, p2.y);
 
@@ -165,17 +183,15 @@ private:
         count += 1.0;
         }
 
-        if (count == 0.0) {
-        RCLCPP_ERROR(this->get_logger(), "Can't identify cluster center.");
-        // TODO: Write exception throwing
-        //   throw
-        }
 
-        geometry_msgs::msg::Point p;
-        p.x = sx / count;
-        p.y = sy / count;
-        return p;
-    }
+        if (count == 0.0)
+        throw ClusterCenterError("No valid rays in cluster");
+
+            geometry_msgs::msg::Point p;
+            p.x = sx / count;
+            p.y = sy / count;
+            return p;
+        }
 
     // -------- PUBLISH TF --------
     void make_cart_frame_tf(geometry_msgs::msg::Point &point_laser) {
@@ -212,7 +228,8 @@ private:
         const double kp_yaw = 2.0;
         const double v_min = 0.1, v_max = 0.5; // min and max linear velocity
         const double w_max = 1.0; // min and max angular velocity
-        const double stop_dist = 0.02, stop_yaw = 0.02; // stop distance and yaw
+        const double stop_dist = 0.02;         // stop distance and yaw
+        const double yaw_gate = 0.7; // ~40°: rotate-in-place when misaligned
 
         rclcpp::Rate rate(10.0); // 10 Hz (100ms per iteration)
 
@@ -235,9 +252,10 @@ private:
         const double dy = tf.transform.translation.y;
         const double error_distance = std::hypot(dx, dy);
         const double error_yaw = std::atan2(dy, dx);
-        RCLCPP_INFO(this->get_logger(), "Distance to cart: %.3f  Yaw: %.3f",
-                    error_distance, error_yaw);
-        if (error_distance <= stop_dist && std::abs(error_yaw) <= stop_yaw) {
+        RCLCPP_INFO(this->get_logger(),
+                    "Distance to cart: %.3f  Yaw: %.3f, dx=%.3f dy=%.3f",
+                    error_distance, error_yaw, dx, dy);
+        if (dx >= 0.0 && std::abs(dx) <= stop_dist && std::abs(dy) <= stop_dist) {
             geometry_msgs::msg::Twist stop;
             cmd_vel_publisher_->publish(stop);
             RCLCPP_INFO(this->get_logger(), "Reached the cart frame. (%.3f m)",
@@ -248,12 +266,10 @@ private:
         geometry_msgs::msg::Twist cmd;
 
         cmd.linear.x = std::clamp(kp_dist * error_distance, v_min, v_max);
-        double w = kp_yaw * error_yaw;
-        if (w > w_max)
-            w = w_max;
-        if (w < -w_max)
-            w = -w_max;
-        cmd.angular.z = w;
+        cmd.angular.z = std::clamp(kp_yaw * error_yaw, -w_max, w_max);
+        if (std::abs(error_yaw) > yaw_gate)
+            cmd.linear.x = 0.0; // turn first in place
+
         cmd_vel_publisher_->publish(cmd);
         rate.sleep();
         }
@@ -286,7 +302,7 @@ private:
         }
 
         geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = v_min;
+        cmd.linear.x = std::clamp(kp_dist * error_distance, v_min, v_max);
         cmd_vel_publisher_->publish(cmd);
         rate.sleep();
         }
