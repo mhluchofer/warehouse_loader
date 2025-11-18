@@ -63,6 +63,7 @@ public:
     obstacle_dist_ += obstacle_error_; // small error to detect early obstacle
 
     this->get_parameter("degrees", rotation_degrees_);
+    this->get_parameter("final_approach", final_approach_);
 
     RCLCPP_INFO(
         this->get_logger(),
