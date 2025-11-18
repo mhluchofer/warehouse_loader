@@ -1,3 +1,4 @@
+#include <attach_shelf/srv/go_to_loading.hpp>
 #include "rclcpp/logging.hpp"
 #include <cmath>
 #include <geometry_msgs/msg/twist.hpp>
@@ -15,7 +16,9 @@ using namespace std::chrono_literals;
 
 class PreApproach : public rclcpp::Node {
 public:
-  PreApproach() : Node("pre_approach_node") {
+
+    using GoToLoading = attach_shelf::srv::GoToLoading;
+    PreApproach() : Node("pre_approach_node") {
     using rcl_interfaces::msg::FloatingPointRange;
     using rcl_interfaces::msg::IntegerRange;
     using rcl_interfaces::msg::ParameterDescriptor;
@@ -69,6 +72,22 @@ public:
     cmd_vel_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>(
         "/diffbot_base_controller/cmd_vel_unstamped", 10);
 
+    // Services
+    std::string name_service = '/approach_shelf';
+    approach_client_ = this->create_client<GoToLoading>(name_service);
+
+    // Wait for the service to be available (check every second)
+    while (!approach_client_->wait_for_service(1s)) {
+      if (!rclcpp::ok()) {
+        RCLCPP_ERROR(this->get_logger(),
+                     "Interrupted while waiting for the service. Exiting.");
+        return;
+      }
+      RCLCPP_INFO(this->get_logger(),
+                  "Service %s not available, waiting again...",
+                  name_service.c_str());
+    }
+
     // Control Loop Timer
     timer_ = this->create_wall_timer(
         100ms, std::bind(&PreApproach::control_loop, this));
@@ -76,7 +95,7 @@ public:
     approaching_ = true; // start forward
     turning_ = false;
     front_range_ = std::numeric_limits<float>::infinity();
-    RCLCPP_INFO(this->get_logger(), "Pre Approach Node ready!");
+    RCLCPP_INFO(this->get_logger(), "Pre Approach V2 Node ready!");
   }
 
 private:
@@ -84,7 +103,8 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr
       scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
-  rclcpp::CallbackGroup::SharedPtr callback_group_;
+  //rclcpp::CallbackGroup::SharedPtr callback_group_;
+  rclcpp::Client<GoToLoading> approach_client_;
   rclcpp::TimerBase::SharedPtr timer_;
   double obstacle_dist_{0.5}; // Param: stop distance
   int rotation_degrees_{0};   // Param: rotation after stop

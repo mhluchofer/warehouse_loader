@@ -11,6 +11,9 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
 #include <vector>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <geometry_msgs/msg/point_stamped.hpp>
 
 struct Cluster {
   std::size_t start_idx;
@@ -58,7 +61,7 @@ private:
 
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster>  tf_static_broadcaster_;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
     // ------------ SCAN CALLBACK -----------
     void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
@@ -87,12 +90,12 @@ private:
         RCLCPP_INFO(this->get_logger(), "Detected %ld shelf legs(clusters)",intensity_clusters.size());
 
         // 2. Identify centres of cluster and calculate centre between 2 shelf legs
-        Point p1 = find_cluster_center(*last_scan, intensity_clusters[0]);
-        Point p2 = find_cluster_center(*last_scan, intensity_clusters[1]);
+        geometry_msgs::msg::Point p1 = find_cluster_center(*last_scan, intensity_clusters[0]);
+        geometry_msgs::msg::Point p2 = find_cluster_center(*last_scan, intensity_clusters[1]);
         RCLCPP_INFO(this->get_logger(), "First leg X: %.3f Y: %.3f", p1.x, p1.y);
         RCLCPP_INFO(this->get_logger(), "Second leg X: %.3f Y: %.3f", p2.x, p2.y);
 
-        Point centre;
+        geometry_msgs::msg::Point centre;
         centre.x = 0.5 * (p1.x + p2.x);
         centre.y = 0.5 * (p1.y + p2.y);
         RCLCPP_INFO(this->get_logger(), "Centre point X: %.3f Y: %.3f", centre.x,
@@ -168,14 +171,14 @@ private:
         //   throw
         }
 
-        Point p;
+        geometry_msgs::msg::Point p;
         p.x = sx / count;
         p.y = sy / count;
         return p;
     }
 
     // -------- PUBLISH TF --------
-    void make_cart_frame_tf(Point &point_laser) {
+    void make_cart_frame_tf(geometry_msgs::msg::Point &point_laser) {
         // 1. Look up transform odom <- laser (we use latest)
         geometry_msgs::msg::TransformStamped T;
 
@@ -191,7 +194,7 @@ private:
         }
 
         // 2. Transform our target point to odom
-        Point point_odom;
+        geometry_msgs::msg::Point point_odom;
         point_odom = transformPointManual(T, point_laser);
         // point_odom = transfromPointTF2(T, point_laser);
 
@@ -207,8 +210,8 @@ private:
 
         const double kp_dist = 0.5;
         const double kp_yaw = 2.0;
-        const double v_min = 0.05, v_max = 0.5; // min and max linear velocity
-        const double w_min = 0.25, w_max = 1.0; // min and max angular velocity
+        const double v_min = 0.1, v_max = 0.5; // min and max linear velocity
+        const double w_max = 1.0; // min and max angular velocity
         const double stop_dist = 0.02, stop_yaw = 0.02; // stop distance and yaw
 
         rclcpp::Rate rate(10.0); // 10 Hz (100ms per iteration)
@@ -243,10 +246,14 @@ private:
         }
 
         geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = std::max(v_min, std::min(kp_dist * error_distance, v_max));
-        cmd.angular.z =
-            kp_yaw *
-            error_yaw; // std::max(w_min, std::min(kp_yaw * error_yaw, w_max));
+
+        cmd.linear.x = std::clamp(kp_dist * error_distance, v_min, v_max);
+        double w = kp_yaw * error_yaw;
+        if (w > w_max)
+            w = w_max;
+        if (w < -w_max)
+            w = -w_max;
+        cmd.angular.z = w;
         cmd_vel_publisher_->publish(cmd);
         rate.sleep();
         }
@@ -279,7 +286,7 @@ private:
         }
 
         geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = std::max(v_min, std::min(kp_dist * error_distance, v_max));
+        cmd.linear.x = v_min;
         cmd_vel_publisher_->publish(cmd);
         rate.sleep();
         }
@@ -291,7 +298,7 @@ private:
         return true;
     }
 
-    void publish_cart_frame_in_odom(const Point &p_odom) {
+    void publish_cart_frame_in_odom(const geometry_msgs::msg::Point &p_odom) {
         geometry_msgs::msg::TransformStamped tf;
         tf.header.stamp = this->get_clock()->now();
         tf.header.frame_id = "odom";
@@ -309,9 +316,9 @@ private:
         tf_static_broadcaster_->sendTransform(tf);
     }
 
-    Point transformPointManual(
+    geometry_msgs::msg::Point transformPointManual(
         const geometry_msgs::msg::TransformStamped &laser_odom_tf,
-        const Point &p_laser) {
+        const geometry_msgs::msg::Point &p_laser) {
         // q - rotation from laser axes to odom axes  || R{odom<-laser}
         tf2::Quaternion q(
             laser_odom_tf.transform.rotation.x, laser_odom_tf.transform.rotation.y,
@@ -329,16 +336,18 @@ private:
         // Apply rotation then translation:  p_odom = R(q)*p_laser + t
         tf2::Vector3 vec_odom = tf2::quatRotate(q, vec_laser) + t;
 
-        Point p_odom;
+        geometry_msgs::msg::Point p_odom;
         p_odom.x = vec_odom.x();
         p_odom.y = vec_odom.y();
         p_odom.z = vec_odom.z();
         return p_odom;
     }
 
-    Point transfromPointTF2(const geometry_msgs::msg::TransformStamped &T,
-                            const Point &p_laser) {
-        PointStamped ps_laser, ps_odom;
+    geometry_msgs::msg::Point transfromPointTF2(
+        const geometry_msgs::msg::TransformStamped &T,
+        const geometry_msgs::msg::Point &p_laser) 
+    {
+        geometry_msgs::msg::PointStamped ps_laser, ps_odom;
         ps_laser.header.frame_id = "robot_front_laser_base_link";
         ps_laser.header.stamp = this->get_clock()->now();
         ps_laser.point = p_laser;
