@@ -31,6 +31,7 @@ private:
   double current_yaw_, target_yaw_;
   float front_range_;
   bool approaching_, turning_;
+   bool exit_on_end_{true}; // Exit program when finished parameter
 
   void control_loop();
   void stop();

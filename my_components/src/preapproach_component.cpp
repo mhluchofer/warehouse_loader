@@ -2,6 +2,7 @@
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/utils.h>
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
 
 using namespace std::chrono_literals;
 
@@ -12,11 +13,23 @@ static double normalize_angle(double angle) {
     angle += 2 * M_PI;
   return angle;
 }
-
 namespace my_components {
 
 PreApproach::PreApproach(const rclcpp::NodeOptions &options)
     : Node("pre_approach_node", options) {
+    using rcl_interfaces::msg::ParameterDescriptor;
+
+  // -- exit_on_end (bool) ---
+  ParameterDescriptor exit_on_end_desc;
+  exit_on_end_desc.description = "Exit Program on end of the algorithm.";
+
+  this->declare_parameter<bool>("exit_on_end", true,
+                                exit_on_end_desc); // Exit Program when finished
+
+  // Load params for use
+  this->get_parameter("exit_on_end", exit_on_end_);
+  RCLCPP_INFO(this->get_logger(), "Params loaded: exit_on_end=%s",
+              exit_on_end_ ? "True" : "False");
 
   // Subscribers
   scan_subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
@@ -68,7 +81,14 @@ void PreApproach::control_loop() {
       turning_ = false;
       RCLCPP_INFO(this->get_logger(), "Turn complete! Final yaw: %.3f rad",
                   current_yaw_);
-      rclcpp::shutdown();
+      
+      // Stop the timer so the loop doesn’t run again.
+      if (timer_)
+        timer_->cancel();
+
+      if (exit_on_end_)
+        rclcpp::shutdown();
+
       return;
     }
     double angular_speed = std::abs(yaw_error) > slow_zone_rad_
@@ -99,11 +119,14 @@ void PreApproach::laserscan_callback(
   front_range_ = min_val;
 }
 
+
 void PreApproach::odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
   tf2::Quaternion q(msg->pose.pose.orientation.x, msg->pose.pose.orientation.y,
                     msg->pose.pose.orientation.z, msg->pose.pose.orientation.w);
   current_yaw_ = tf2::getYaw(q);
 }
+
+
 
 } // namespace my_components
 
