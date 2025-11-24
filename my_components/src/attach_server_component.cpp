@@ -1,6 +1,7 @@
 #include "my_components/attach_server_component.hpp"
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <cmath>
 
 namespace my_components {
@@ -132,13 +133,127 @@ void AttachServer::make_cart_frame_tf(const Point &centre_laser, const Point &p1
 }
 
 Point AttachServer::transformPointTF2(const geometry_msgs::msg::TransformStamped &T, const Point &p_laser){
-  PointStamped ps_laser, ps_odom;
+  geometry_msgs::msg::PointStamped ps_laser, ps_odom;
   ps_laser.header.frame_id = T.child_frame_id;
   ps_laser.header.stamp = T.header.stamp;
-  ps_laser.point = p_laser;
+  ps_laser.point.x = p_laser.x;
+  ps_laser.point.y = p_laser.y;
+  ps_laser.point.z = p_laser.z;
   tf2::doTransform(ps_laser, ps_odom, T);
-  return ps_odom.point;
+  return { ps_odom.point.x, ps_odom.point.y, ps_odom.point.z };
 }
+
+bool AttachServer::run_attach_algorithm() {
+
+  const std::string robot_frame = "robot_base_footprint";
+  const std::string cart_frame = "cart_frame";
+
+  const double kp_dist = 0.5;
+  const double kp_yaw = 2.0;
+  const double v_min = 0.1, v_max = 0.5; // min and max linear velocity
+  const double w_max = 1.0;              // min and max angular velocity
+  const double stop_dist = 0.01;         // stop distance and yaw
+  const double yaw_gate = 0.5; // ~30deg: rotate-in-place when misaligned
+
+  rclcpp::Rate rate(10.0); // 10 Hz (100ms per iteration)
+
+  // 1. Use TF to approach cart_frame
+  while (rclcpp::ok()) {
+    geometry_msgs::msg::TransformStamped tf;
+    try {
+      tf = tf_buffer_->lookupTransform(robot_frame, cart_frame, rclcpp::Time(0),
+                                       rclcpp::Duration::from_seconds(0.1));
+    } catch (const tf2::TransformException &ex) {
+      RCLCPP_WARN(this->get_logger(),
+                  "TF robot_front_laser_base_link to cart_frame failed: %s",
+                  ex.what());
+      return false;
+    }
+
+    const double dx = tf.transform.translation.x;
+    const double dy = tf.transform.translation.y;
+    const double error_distance = std::hypot(dx, dy);
+    const double error_yaw = std::atan2(dy, dx);
+
+    if (dx >= 0.0 && std::abs(dx) <= stop_dist && std::abs(dy) <= stop_dist) {
+      geometry_msgs::msg::Twist stop;
+      cmd_vel_publisher_->publish(stop);
+      RCLCPP_INFO(this->get_logger(), "Reached the cart frame. (%.3f m)",
+                  error_distance);
+      break;
+    }
+
+    geometry_msgs::msg::Twist cmd;
+    cmd.linear.x = std::clamp(kp_dist * error_distance, v_min, v_max);
+    cmd.angular.z = std::clamp(kp_yaw * error_yaw, -w_max, w_max);
+    if (std::abs(error_yaw) > yaw_gate)
+      cmd.linear.x = 0.0;
+
+    cmd_vel_publisher_->publish(cmd);
+    rate.sleep();
+  }
+
+  // 2. Advance additional 30cm forward
+  while (rclcpp::ok()) {
+    geometry_msgs::msg::TransformStamped tf;
+    try {
+      tf = tf_buffer_->lookupTransform(robot_frame, cart_frame, rclcpp::Time(0),
+                                       rclcpp::Duration::from_seconds(0.1));
+    } catch (const tf2::TransformException &ex) {
+      RCLCPP_WARN(this->get_logger(),
+                  "TF robot_front_laser_base_link to cart_frame failed: %s",
+                  ex.what());
+      return false;
+    }
+
+    const double dx = tf.transform.translation.x;
+    const double dy = tf.transform.translation.y;
+    const double error_distance = std::hypot(dx, dy);
+    const double error_yaw = tf2::getYaw(tf.transform.rotation);
+
+    if (error_distance >= 0.3) {
+      geometry_msgs::msg::Twist stop;
+      cmd_vel_publisher_->publish(stop);
+      RCLCPP_INFO(this->get_logger(), "Advance 30cm complete.");
+      break;
+    }
+
+    geometry_msgs::msg::Twist cmd;
+    cmd.linear.x = std::clamp(kp_dist * error_distance, v_min, v_max);
+    cmd.angular.z = std::clamp(kp_yaw * error_yaw, -w_max, w_max);
+    cmd_vel_publisher_->publish(cmd);
+    rate.sleep();
+  }
+
+  // 3. Rise up the shelf
+  std_msgs::msg::String msg;
+  liftup_publisher_->publish(msg);
+  RCLCPP_INFO(this->get_logger(), "Lifted the shelf up.");
+  return true;
+}
+
+
+void AttachServer::publish_cart_frame_in_odom(const Point &p_odom, double yaw) {
+  geometry_msgs::msg::TransformStamped tf;
+  tf.header.stamp = this->get_clock()->now();
+  tf.header.frame_id = "odom";
+  tf.child_frame_id = "cart_frame";
+
+  tf.transform.translation.x = p_odom.x;
+  tf.transform.translation.y = p_odom.y;
+  tf.transform.translation.z = 0.0;
+
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, yaw);
+
+  tf.transform.rotation.x = q.x();
+  tf.transform.rotation.y = q.y();
+  tf.transform.rotation.z = q.z();
+  tf.transform.rotation.w = q.w();
+
+  tf_static_broadcaster_->sendTransform(tf);
+}
+
 
 } // namespace my_components
 

@@ -13,6 +13,10 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <vector>
 #include <stdexcept>
+#include <geometry_msgs/msg/point_stamped.hpp>
+#include <tf2/utils.h>
+
+
 
 namespace my_components {
 
@@ -26,6 +30,15 @@ struct Point {
   double x;
   double y;
   double z;
+};
+
+
+using GoToLoading = attach_shelf::srv::GoToLoading;
+//using Point = geometry_msgs::msg::Point;
+class ClusterCenterError : public std::runtime_error {
+public:
+  explicit ClusterCenterError(const std::string &msg)
+  : std::runtime_error(msg) {}
 };
 
 class AttachServer : public rclcpp::Node {

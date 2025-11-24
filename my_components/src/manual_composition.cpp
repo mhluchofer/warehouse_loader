@@ -13,8 +13,8 @@ int main(int argc, char *argv[]) {
   //auto pre_approach = std::make_shared<my_components::PreApproach>(options);
   //exec.add_node(pre_approach);
 
-  auto attach_server = std::make_shared<my_components::AttachServer>(options);
-  exec.add_node(attach_server);
+  auto server = std::make_shared<my_components::AttachServer>(options);
+  exec.add_node(server);
 
   exec.spin();
   rclcpp::shutdown();
