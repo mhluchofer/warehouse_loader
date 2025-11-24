@@ -1,10 +1,10 @@
 #ifndef MY_COMPONENTS__ATTACH_CLIENT_COMPONENT_HPP_
 #define MY_COMPONENTS__ATTACH_CLIENT_COMPONENT_HPP_
 
-
 #include "my_components/visibility_control.h"
 #include "rclcpp/rclcpp.hpp"
 #include <attach_shelf/srv/go_to_loading.hpp>
+
 namespace my_components
 {
 
