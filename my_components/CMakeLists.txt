@@ -80,6 +80,7 @@ install(TARGETS
 
 # Install share files, launch 
 install(DIRECTORY
+    launch
 	rviz
 	DESTINATION share/${PROJECT_NAME})
 

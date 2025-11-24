@@ -15,9 +15,8 @@ AttachClient::AttachClient(const rclcpp::NodeOptions & options)
   this->declare_parameter<double>("timeout", 5.0);
 
   // Wait a little before calling
-  rclcpp::TimerBase::SharedPtr timer_ =
-    this->create_wall_timer(
-      std::chrono::seconds(1),
+  timer_ = this->create_wall_timer(
+      0s,
       std::bind(&AttachClient::call_service, this));
 }
 
